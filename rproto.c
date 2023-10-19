@@ -126,7 +126,7 @@ uint16_t computing_crc_of_packet(rproto_packet* packet)
 {
     size_t size =
         sizeof(packet->preamble) + sizeof(packet->id) + sizeof(packet->payload_length) + packet->payload_length;
-    uint16_t result = crc16((char*) packet, (int) size);
+    uint16_t result = crc16_modbus((char*) packet, (int) size);
     return result;
 }
 
@@ -215,7 +215,7 @@ bool rproto_serial_send_packet(rproto_serial* instance, rproto_packet* packet)
     size_t size = sizeof(packet->preamble) + sizeof(packet->id) + sizeof(packet->payload_length) + base64_packet->payload_length;
 
     uint16_t* crc = (uint16_t*) &base64_payload_packet[size];
-    *crc          = crc16((char*) &base64_payload_packet, (int) size);
+    *crc          = crc16_modbus((char*) &base64_payload_packet, (int) size);
     size += sizeof(packet->crc);
     packet->crc = *crc;
 

@@ -31,7 +31,7 @@ bool serial_get_preamble(rproto_serial* instance, unsigned int timeout_ms)
 {
     uint8_t* preamble = (uint8_t*) &instance->buf.preamble;
     int      res      = rserial_read(&instance->serial, preamble, sizeof(instance->buf.preamble), timeout_ms * 1000);
-    if ((size_t) res < sizeof(instance->buf.preamble))
+    if (res < (int) sizeof(instance->buf.preamble))
     {
         return false;
     }
@@ -53,7 +53,7 @@ bool serial_get_preamble(rproto_serial* instance, unsigned int timeout_ms)
 bool serial_get_id(rproto_serial* instance, unsigned int timeout_ms)
 {
     int res = rserial_read(&instance->serial, &instance->buf.id, sizeof(instance->buf.id), timeout_ms * 1000);
-    if ((size_t) res < sizeof(instance->buf.id))
+    if (res < (int) sizeof(instance->buf.id))
     {
         return false;
     }
@@ -79,7 +79,7 @@ bool serial_get_payload(rproto_serial* instance, unsigned int timeout_ms)
 {
     int res = rserial_read(&instance->serial, instance->buf.payload, instance->buf.payload_length, timeout_ms * 1000);
 
-    if (res < instance->buf.payload_length)
+    if (res < (int) instance->buf.payload_length)
     {
         return false;
     }
@@ -212,7 +212,8 @@ bool rproto_serial_send_packet(rproto_serial* instance, rproto_packet* packet)
     memcpy(base64_payload_packet, (uint8_t*) packet, sizeof(packet->preamble) + sizeof(packet->id));
     decode_payload_and_copy_to(packet, base64_packet);
 
-    size_t size = sizeof(packet->preamble) + sizeof(packet->id) + sizeof(packet->payload_length) + base64_packet->payload_length;
+    size_t size =
+        sizeof(packet->preamble) + sizeof(packet->id) + sizeof(packet->payload_length) + base64_packet->payload_length;
 
     uint16_t* crc = (uint16_t*) &base64_payload_packet[size];
     *crc          = crc16_modbus((char*) &base64_payload_packet, (int) size);

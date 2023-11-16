@@ -14,4 +14,6 @@ bool rproto_serial_get_packet(rproto_serial* instance, rproto_packet* packet, un
 
 bool rproto_serial_send_packet(rproto_serial* instance, rproto_packet* packet);
 
+bool rproto_serial_is_ok(rproto_serial* instance);
+
 bool rproto_serial_stop(rproto_serial* instance);

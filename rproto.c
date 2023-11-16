@@ -98,18 +98,6 @@ bool serial_get_crc(rproto_serial* instance, unsigned int timeout_ms)
     return true;
 }
 
-bool rproto_serial_stop(rproto_serial* instance)
-{
-    if (instance == NULL)
-    {
-        return false;
-    }
-#ifdef RPROTO_SERIAL_DEBUG
-    RLOG_INFO(" serial : %s  stop ", instance->settings.port_name);
-#endif
-    return rserial_close(&instance->serial) == 0;
-}
-
 void encode_payload_and_copy_to(rproto_packet* src_packet, rproto_packet* dest_packet)
 {
     dest_packet->payload_length =
@@ -126,7 +114,7 @@ uint16_t computing_crc_of_packet(rproto_packet* packet)
 {
     size_t size =
         sizeof(packet->preamble) + sizeof(packet->id) + sizeof(packet->payload_length) + packet->payload_length;
-    uint16_t result = crc16_modbus((char*) packet, (int) size);
+    uint16_t result = crc16_ccitt((char*) packet, (int) size);
     return result;
 }
 
@@ -216,7 +204,7 @@ bool rproto_serial_send_packet(rproto_serial* instance, rproto_packet* packet)
         sizeof(packet->preamble) + sizeof(packet->id) + sizeof(packet->payload_length) + base64_packet->payload_length;
 
     uint16_t* crc = (uint16_t*) &base64_payload_packet[size];
-    *crc          = crc16_modbus((char*) &base64_payload_packet, (int) size);
+    *crc          = crc16_ccitt((char*) &base64_payload_packet, (int) size);
     size += sizeof(packet->crc);
     packet->crc = *crc;
 
@@ -226,4 +214,21 @@ bool rproto_serial_send_packet(rproto_serial* instance, rproto_packet* packet)
         return false;
     }
     return true;
+}
+
+bool rproto_serial_is_ok(rproto_serial* instance)
+{
+    return rserial_is_ok(&instance->serial);
+}
+
+bool rproto_serial_stop(rproto_serial* instance)
+{
+    if (instance == NULL)
+    {
+        return false;
+    }
+#ifdef RPROTO_SERIAL_DEBUG
+    RLOG_INFO(" serial : %s  stop ", instance->settings.port_name);
+#endif
+    return rserial_close(&instance->serial) == 0;
 }

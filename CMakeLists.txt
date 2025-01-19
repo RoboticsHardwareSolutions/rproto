@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.24)
-project(rproto C)
-set(CMAKE_C_STANDARD 11)
-
+project(rproto
+        VERSION 0.1.0
+        LANGUAGES C
+        DESCRIPTION
+        "simple way for get packet from serial port")
 
 file(GLOB RPROTO_SOURCES "*.c")
 file(GLOB RPROTO_HEADERS "*.h")

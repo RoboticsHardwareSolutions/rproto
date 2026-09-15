@@ -5,7 +5,6 @@
 #include "rserial.h"
 #include "rproto_def.h"
 
-
 int rproto_serial_setup(rproto_serial* instance, char* port_name, int baud, char* mode, int flowctrl);
 
 bool rproto_serial_start(rproto_serial* instance);

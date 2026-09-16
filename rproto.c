@@ -37,7 +37,7 @@ bool serial_get_preamble(rproto_serial* instance, unsigned int timeout_ms)
     }
     else
     {
-        if (instance->buf.preamble == PREAMBLE_REQUEST || instance->buf.preamble == PREAMBLE_UNIQUE_ID ||
+        if (instance->buf.preamble == PREAMBLE_REQUEST || instance->buf.preamble == PREAMBLE_RESPONSE ||
             instance->buf.preamble == PREAMBLE_UNIQUE_ID || instance->buf.preamble == PREAMBLE_SET_ID ||
             instance->buf.preamble == PREAMBLE_BROADCAST)
         {
@@ -191,6 +191,21 @@ bool rproto_serial_send_packet(rproto_serial* instance, rproto_packet* packet)
     if (packet->payload_length > PROTO_MAX_PAYLOAD_LENGTH)
     {
         RLOG_ERROR("payload length is too long MAX VALUE is %d", PROTO_MAX_PAYLOAD_LENGTH);
+        return false;
+    }
+    bool pream_correct = false;
+    if (packet->preamble == PREAMBLE_REQUEST || packet->preamble == PREAMBLE_RESPONSE ||
+        packet->preamble == PREAMBLE_UNIQUE_ID || packet->preamble == PREAMBLE_SET_ID ||
+        packet->preamble == PREAMBLE_BROADCAST)
+    {
+        pream_correct = true;
+    }
+    else
+    {
+        pream_correct = false;
+    }
+    if (!pream_correct)
+    {
         return false;
     }
 

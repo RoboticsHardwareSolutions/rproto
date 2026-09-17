@@ -23,10 +23,91 @@ target_link_libraries(
         rlog
 )
 
+if (NOT TARGET rlog)
+    include(FetchContent)
+    FetchContent_Declare(
+            rlog
+            GIT_REPOSITORY https://github.com/RoboticsHardwareSolutions/rlog.git
+            GIT_TAG main
+    )
+    FetchContent_MakeAvailable(rlog)
+endif ()
+
+if (NOT TARGET rtimeout)
+    include(FetchContent)
+    FetchContent_Declare(
+            rtimeout
+            GIT_REPOSITORY https://github.com/RoboticsHardwareSolutions/rtimeout.git
+            GIT_TAG main
+    )
+    FetchContent_MakeAvailable(rtimeout)
+endif ()
+
+if (NOT TARGET rcrc)
+    include(FetchContent)
+    FetchContent_Declare(
+            rcrc
+            GIT_REPOSITORY https://github.com/RoboticsHardwareSolutions/rcrc.git
+            GIT_TAG main
+    )
+    FetchContent_MakeAvailable(rcrc)
+endif ()
+
+
+if (NOT TARGET rserial)
+    include(FetchContent)
+    FetchContent_Declare(
+            rserial
+            GIT_REPOSITORY https://github.com/RoboticsHardwareSolutions/rserial.git
+            GIT_TAG main
+    )
+    FetchContent_MakeAvailable(rserial)
+endif ()
+
+
+if (NOT TARGET rbase64)
+    include(FetchContent)
+    FetchContent_Declare(
+            rbase64
+            GIT_REPOSITORY https://github.com/RoboticsHardwareSolutions/rbase64.git
+            GIT_TAG main
+    )
+    FetchContent_MakeAvailable(rbase64)
+endif ()
+
+
+#################### TEST SECTION #######################
+if (NOT ${CMAKE_SYSTEM_NAME} MATCHES Generic)
+    add_executable(${PROJECT_NAME}_test test/test.c)
+    if (NOT TARGET runit)
+        include(FetchContent)
+        FetchContent_Declare(
+                runit
+                GIT_REPOSITORY https://github.com/RoboticsHardwareSolutions/runit.git
+                GIT_TAG main
+        )
+        FetchContent_MakeAvailable(runit)
+    endif ()
+    target_link_libraries(${PROJECT_NAME}_test rproto runit rcrc rbase64 rserial)
+    enable_testing()
+
+    add_test(NAME socatStart COMMAND ${CMAKE_CURRENT_LIST_DIR}/test/socatfortests.sh start)
+    add_test(NAME socatStop COMMAND ${CMAKE_CURRENT_LIST_DIR}/test/socatfortests.sh stop)
+    add_test(NAME ${PROJECT_NAME}_test COMMAND ${PROJECT_NAME}_test)
+
+    set_tests_properties(socatStart PROPERTIES FIXTURES_SETUP socat)
+    set_tests_properties(socatStop PROPERTIES FIXTURES_CLEANUP socat)
+    set_tests_properties(${PROJECT_NAME}_test PROPERTIES FIXTURES_REQUIRED "socat")
+endif ()
 
 #################### FORMAT SECTION #######################
 
-set(FILES_FOR_FORMATTING rproto.c rproto.h rproto_def.h )
+set(FILES_FOR_FORMATTING
+        rproto.c
+        rproto.h
+        rproto_def.h
+        test/test.c
+)
 
 if (NOT TARGET rlibhelper)
     include(FetchContent)
@@ -38,11 +119,11 @@ if (NOT TARGET rlibhelper)
     FetchContent_MakeAvailable(rlibhelper)
 endif ()
 
-if(EXISTS "${rlibhelper_SOURCE_DIR}/format.cmake")
+if (EXISTS "${rlibhelper_SOURCE_DIR}/format.cmake")
     include(${rlibhelper_SOURCE_DIR}/format.cmake)
-else()
+else ()
     message(WARNING "format.cmake file not found")
-endif()
+endif ()
 format_files(${PROJECT_NAME} SOURCES ${FILES_FOR_FORMATTING})
 
 

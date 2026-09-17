@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "rproto.h"
 #include "rbase64.h"
 #include "rcrc.h"
@@ -124,6 +126,10 @@ int rproto_serial_setup(rproto_serial* instance, char* port_name, int baud, char
     {
         return -1;
     }
+    if (strlen(port_name) == 0 || strlen(mode) != 3)
+    {
+        return -1;
+    }
     strcpy(instance->settings.port_name, port_name);
     instance->settings.baud = baud;
     strcpy(instance->settings.mode, mode);
@@ -233,6 +239,10 @@ bool rproto_serial_send_packet(rproto_serial* instance, rproto_packet* packet)
 
 bool rproto_serial_is_ok(rproto_serial* instance)
 {
+    if (instance == NULL)
+    {
+        return false;
+    }
     return rserial_is_ok(&instance->serial);
 }
 

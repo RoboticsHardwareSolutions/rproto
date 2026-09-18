@@ -7,7 +7,7 @@
 #include "rserial.h"
 #include "rtimeout.h"
 
-bool rproto_serial_start(rproto_serial* instance)
+bool rproto_start(rproto_serial* instance)
 {
     if (instance == NULL)
     {
@@ -79,6 +79,13 @@ bool serial_get_proto_message_length(rproto_serial* instance, unsigned int timeo
 
 bool serial_get_payload(rproto_serial* instance, unsigned int timeout_ms)
 {
+    // rserial_read() returns -1 for size 0, so an empty payload must be
+    // handled explicitly (the send path supports payload_length == 0)
+    if (instance->buf.payload_length == 0)
+    {
+        return true;
+    }
+
     int res = rserial_read(&instance->serial, instance->buf.payload, instance->buf.payload_length, timeout_ms * 1000);
 
     if (res < (int) instance->buf.payload_length)
@@ -137,7 +144,7 @@ int rproto_serial_setup(rproto_serial* instance, char* port_name, int baud, char
     return 0;
 }
 
-bool rproto_serial_get_packet(rproto_serial* instance, rproto_packet* packet, unsigned int timeout_ms)
+bool rproto_get_packet(rproto_serial* instance, rproto_packet* packet, unsigned int timeout_ms)
 {
     if (instance == NULL || packet == NULL)
     {
@@ -188,7 +195,7 @@ bool rproto_serial_get_packet(rproto_serial* instance, rproto_packet* packet, un
     return true;
 }
 
-bool rproto_serial_send_packet(rproto_serial* instance, rproto_packet* packet)
+bool rproto_send_packet(rproto_serial* instance, rproto_packet* packet)
 {
     if (instance == NULL || packet == NULL)
     {
@@ -237,7 +244,7 @@ bool rproto_serial_send_packet(rproto_serial* instance, rproto_packet* packet)
     return true;
 }
 
-bool rproto_serial_is_ok(rproto_serial* instance)
+bool rproto_is_ok(rproto_serial* instance)
 {
     if (instance == NULL)
     {
@@ -246,7 +253,7 @@ bool rproto_serial_is_ok(rproto_serial* instance)
     return rserial_is_ok(&instance->serial);
 }
 
-bool rproto_serial_stop(rproto_serial* instance)
+bool rproto_stop(rproto_serial* instance)
 {
     if (instance == NULL)
     {

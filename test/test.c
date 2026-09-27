@@ -3,6 +3,7 @@
 #include "rcrc.h"
 #include "rbase64.h"
 #include "rserial.h"
+#include "perf_test.h"
 
 // Virtual ports for testing (unique from rserial)
 #define VIRTUAL_PORT1 "/tmp/rproto1"
@@ -391,6 +392,9 @@ int main(void)
     test_receive_truncated();
     test_receive_invalid_preamble();
     test_receive_bad_crc();
+
+    // Performance tests (throughput, latency, stress with noise, concurrent channels)
+    run_perf_tests();
 
     runit_report();
     return runit_at_least_one_fail;

@@ -9,6 +9,10 @@ file(GLOB RPROTO_SOURCES "*.c")
 file(GLOB RPROTO_HEADERS "*.h")
 add_library(${PROJECT_NAME} STATIC ${RPROTO_SOURCES} ${RPROTO_HEADERS})
 
+# Performance test sources (part of rproto_test)
+file(GLOB RPROTO_PERF_SOURCES test/perf_test.c test/perf_emu.c test/perf_emu_ipc.c)
+file(GLOB RPROTO_PERF_HEADERS test/perf_test.h test/perf_emu.h test/perf_emu_ipc.h)
+
 target_include_directories(
         ${PROJECT_NAME} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
@@ -53,7 +57,6 @@ if (NOT TARGET rcrc)
     FetchContent_MakeAvailable(rcrc)
 endif ()
 
-
 if (NOT TARGET rserial)
     include(FetchContent)
     FetchContent_Declare(
@@ -63,7 +66,6 @@ if (NOT TARGET rserial)
     )
     FetchContent_MakeAvailable(rserial)
 endif ()
-
 
 if (NOT TARGET rbase64)
     include(FetchContent)
@@ -75,37 +77,42 @@ if (NOT TARGET rbase64)
     FetchContent_MakeAvailable(rbase64)
 endif ()
 
+if (NOT TARGET runit)
+    include(FetchContent)
+    FetchContent_Declare(
+            runit
+            GIT_REPOSITORY https://github.com/RoboticsHardwareSolutions/runit.git
+            GIT_TAG main
+    )
+    FetchContent_MakeAvailable(runit)
+endif ()
 
 #################### TEST SECTION #######################
-if (NOT ${CMAKE_SYSTEM_NAME} MATCHES Generic)
-    add_executable(${PROJECT_NAME}_test test/test.c)
-    if (NOT TARGET runit)
-        include(FetchContent)
-        FetchContent_Declare(
-                runit
-                GIT_REPOSITORY https://github.com/RoboticsHardwareSolutions/runit.git
-                GIT_TAG main
-        )
-        FetchContent_MakeAvailable(runit)
-    endif ()
-    target_link_libraries(${PROJECT_NAME}_test rproto runit rcrc rbase64 rserial)
-    enable_testing()
+add_executable(${PROJECT_NAME}_test test/test.c ${RPROTO_PERF_SOURCES})
+target_include_directories(${PROJECT_NAME}_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/test
+)
+target_link_libraries(${PROJECT_NAME}_test rproto runit rcrc rbase64 rserial rlog pthread)
 
-    add_test(NAME socatStart COMMAND ${CMAKE_CURRENT_LIST_DIR}/test/socatfortests.sh start)
-    add_test(NAME socatStop COMMAND ${CMAKE_CURRENT_LIST_DIR}/test/socatfortests.sh stop)
-    add_test(NAME ${PROJECT_NAME}_test COMMAND ${PROJECT_NAME}_test)
+enable_testing()
 
-    set_tests_properties(socatStart PROPERTIES FIXTURES_SETUP socat)
-    set_tests_properties(socatStop PROPERTIES FIXTURES_CLEANUP socat)
-    set_tests_properties(${PROJECT_NAME}_test PROPERTIES FIXTURES_REQUIRED "socat")
-endif ()
+
+add_test(NAME socat_start COMMAND ${CMAKE_CURRENT_LIST_DIR}/test/socat_start.sh start)
+add_test(NAME socat_stop COMMAND ${CMAKE_CURRENT_LIST_DIR}/test/socat_start.sh stop)
+add_test(NAME ${PROJECT_NAME}_test COMMAND ${PROJECT_NAME}_test)
+
+set_tests_properties(socat_start PROPERTIES FIXTURES_SETUP socat)
+set_tests_properties(socat_stop PROPERTIES FIXTURES_CLEANUP socat)
+set_tests_properties(${PROJECT_NAME}_test PROPERTIES FIXTURES_REQUIRED "socat")
+
 
 #################### FORMAT SECTION #######################
 
 set(FILES_FOR_FORMATTING
-        rproto.c
-        rproto.h
-        rproto_def.h
+        ${RPROTO_SOURCES}
+        ${RPROTO_HEADERS}
+        ${RPROTO_PERF_SOURCES}
+        ${RPROTO_PERF_HEADERS}
         test/test.c
 )
 

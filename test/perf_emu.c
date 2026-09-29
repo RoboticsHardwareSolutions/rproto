@@ -211,7 +211,6 @@ bool perf_emu_start(void)
     perf_emu_mutex_init();
 
     // Create socat pairs for each device
-    char cmd[256];
     for (int i = 0; i < PERF_EMU_DEVICE_NUM; i++)
     {
         char port_tx[32], port_rx[32];

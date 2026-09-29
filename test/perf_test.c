@@ -15,17 +15,6 @@
 // Random noise generator state
 static uint32_t xorshift_state = 12345;
 
-// Simple XORSHIFT random number generator
-static uint32_t xorshift32(void)
-{
-    uint32_t x = xorshift_state;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    xorshift_state = x;
-    return x;
-}
-
 // Global results storage
 static perf_test_results g_throughput_results = {0};
 static perf_test_results g_latency_results    = {0};

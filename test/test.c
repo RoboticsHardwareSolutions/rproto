@@ -4,6 +4,7 @@
 #include "rbase64.h"
 #include "rserial.h"
 #include "perf_test.h"
+#include "unistd.h"
 
 // Virtual ports for testing (unique from rserial)
 #define VIRTUAL_PORT1 "/tmp/rproto1"
@@ -377,6 +378,169 @@ void test_receive_bad_crc(void)
     rserial_close(&proto_tx.serial);
 }
 
+// Direct regression test for the real-hardware bug fixed by rewriting rproto_get_packet()
+// to poll via rserial_read_stream() against one cumulative deadline: writes a complete,
+// valid frame split into two rserial_write() calls with a 5ms gap between them, at the
+// preamble/length field boundary. 5ms is 10x the OLD per-field design's 500us inter-byte
+// sub-timeout (RPROTO_SERIAL_BYTE_TIMEOUT_US) - under the old code this would have failed;
+// under the new cumulative 100ms deadline it must succeed.
+void test_receive_with_byte_gap(void)
+{
+    rproto_serial proto_tx = {0};
+
+    runit_true(rserial_open(&proto_tx.serial, VIRTUAL_PORT1, 115200, "8N1", false, 7000) == 0);
+    runit_true(rproto_serial_setup(&proto2, VIRTUAL_PORT2, 115200, "8N1", FLOW_CTRL_NONE) == 0);
+    runit_true(rproto_start(&proto2) == true);
+
+    uint8_t frame[14];
+    int     idx = 0;
+
+    frame[idx++] = 0xAA;
+    frame[idx++] = 0xAA;  // PREAMBLE_RESPONSE
+    frame[idx++] = 0x20;  // id
+
+    int     length_pos = idx++;
+    uint8_t payload[]  = {'O', 'K'};
+    int     b64_len    = (int) b64_encode(payload, 2, &frame[idx]);
+    frame[length_pos]  = (uint8_t) b64_len;
+    idx += b64_len;
+
+    uint16_t crc = crc16_ccitt((char*) frame, idx);
+    frame[idx++] = (uint8_t) (crc & 0xFF);
+    frame[idx++] = (uint8_t) ((crc >> 8) & 0xFF);
+
+    runit_true(rserial_write(&proto_tx.serial, frame, 4) == 4);
+    usleep(5000);
+    size_t rest_len = (size_t) (idx - 4);
+    runit_true(rserial_write(&proto_tx.serial, &frame[4], rest_len) == (int) rest_len);
+
+    rproto_packet packet;
+    bool          result = rproto_get_packet(&proto2, &packet, 100);
+    runit_true(result == true);
+    runit_true(packet.preamble == PREAMBLE_RESPONSE);
+    runit_true(packet.id == 0x20);
+    runit_true(packet.payload_length == 2);
+    runit_true(memcmp(packet.payload, payload, 2) == 0);
+
+    rproto_stop(&proto2);
+    rserial_close(&proto_tx.serial);
+}
+
+// Same idea as test_receive_with_byte_gap(), but the gap lands in the MIDDLE of the base64
+// payload bytes rather than at a field boundary - the old design's inter-byte sub-timeout
+// applied inside the payload field's own rserial_read() call just as much as inside the
+// 2-byte preamble.
+void test_receive_with_byte_gap_mid_payload(void)
+{
+    rproto_serial proto_tx = {0};
+
+    runit_true(rserial_open(&proto_tx.serial, VIRTUAL_PORT1, 115200, "8N1", false, 7000) == 0);
+    runit_true(rproto_serial_setup(&proto2, VIRTUAL_PORT2, 115200, "8N1", FLOW_CTRL_NONE) == 0);
+    runit_true(rproto_start(&proto2) == true);
+
+    uint8_t frame[64];
+    int     idx = 0;
+
+    frame[idx++] = 0xAA;
+    frame[idx++] = 0xAA;
+    frame[idx++] = 0x21;
+
+    int     length_pos = idx++;
+    uint8_t payload[20];
+    for (int i = 0; i < 20; i++)
+    {
+        payload[i] = (uint8_t) i;
+    }
+    int b64_len       = (int) b64_encode(payload, sizeof(payload), &frame[idx]);
+    frame[length_pos] = (uint8_t) b64_len;
+    idx += b64_len;
+
+    uint16_t crc = crc16_ccitt((char*) frame, idx);
+    frame[idx++] = (uint8_t) (crc & 0xFF);
+    frame[idx++] = (uint8_t) ((crc >> 8) & 0xFF);
+
+    int split = 4 + b64_len / 2;
+    runit_true(rserial_write(&proto_tx.serial, frame, (size_t) split) == split);
+    usleep(5000);
+    size_t rest_len = (size_t) (idx - split);
+    runit_true(rserial_write(&proto_tx.serial, &frame[split], rest_len) == (int) rest_len);
+
+    rproto_packet packet;
+    bool          result = rproto_get_packet(&proto2, &packet, 100);
+    runit_true(result == true);
+    runit_true(packet.payload_length == sizeof(payload));
+    runit_true(memcmp(packet.payload, payload, sizeof(payload)) == 0);
+
+    rproto_stop(&proto2);
+    rserial_close(&proto_tx.serial);
+}
+
+// Regression test for the leftover-carry mechanism: two complete, valid, distinct frames
+// written in ONE rserial_write() call (as if a single underlying read had grabbed both at
+// once, e.g. via rserial_read_stream()'s FIONREAD-driven read). The first
+// rproto_get_packet() call must return only the first frame and must not lose the second
+// frame's already-buffered bytes - a second call must then return the second frame intact.
+void test_receive_back_to_back_frames(void)
+{
+    rproto_serial proto_tx = {0};
+
+    runit_true(rserial_open(&proto_tx.serial, VIRTUAL_PORT1, 115200, "8N1", false, 7000) == 0);
+    runit_true(rproto_serial_setup(&proto2, VIRTUAL_PORT2, 115200, "8N1", FLOW_CTRL_NONE) == 0);
+    runit_true(rproto_start(&proto2) == true);
+
+    uint8_t combined[64];
+    size_t  combined_len = 0;
+
+    uint8_t frame_a[32];
+    int     idx = 0;
+    frame_a[idx++]        = 0xAA;
+    frame_a[idx++]        = 0xAA;
+    frame_a[idx++]        = 0x30;
+    int     length_pos_a  = idx++;
+    uint8_t payload_a[]   = {'A', 'A'};
+    int     b64_len_a     = (int) b64_encode(payload_a, 2, &frame_a[idx]);
+    frame_a[length_pos_a] = (uint8_t) b64_len_a;
+    idx += b64_len_a;
+    uint16_t crc_a = crc16_ccitt((char*) frame_a, idx);
+    frame_a[idx++] = (uint8_t) (crc_a & 0xFF);
+    frame_a[idx++] = (uint8_t) ((crc_a >> 8) & 0xFF);
+    memcpy(&combined[combined_len], frame_a, (size_t) idx);
+    combined_len += (size_t) idx;
+
+    uint8_t frame_b[32];
+    idx                   = 0;
+    frame_b[idx++]        = 0xAA;
+    frame_b[idx++]        = 0xAA;
+    frame_b[idx++]        = 0x31;
+    int     length_pos_b  = idx++;
+    uint8_t payload_b[]   = {'B', 'B', 'B'};
+    int     b64_len_b     = (int) b64_encode(payload_b, 3, &frame_b[idx]);
+    frame_b[length_pos_b] = (uint8_t) b64_len_b;
+    idx += b64_len_b;
+    uint16_t crc_b = crc16_ccitt((char*) frame_b, idx);
+    frame_b[idx++] = (uint8_t) (crc_b & 0xFF);
+    frame_b[idx++] = (uint8_t) ((crc_b >> 8) & 0xFF);
+    memcpy(&combined[combined_len], frame_b, (size_t) idx);
+    combined_len += (size_t) idx;
+
+    runit_true(rserial_write(&proto_tx.serial, combined, combined_len) == (int) combined_len);
+
+    rproto_packet packet_a;
+    runit_true(rproto_get_packet(&proto2, &packet_a, 100) == true);
+    runit_true(packet_a.id == 0x30);
+    runit_true(packet_a.payload_length == 2);
+    runit_true(memcmp(packet_a.payload, payload_a, 2) == 0);
+
+    rproto_packet packet_b;
+    runit_true(rproto_get_packet(&proto2, &packet_b, 100) == true);
+    runit_true(packet_b.id == 0x31);
+    runit_true(packet_b.payload_length == 3);
+    runit_true(memcmp(packet_b.payload, payload_b, 3) == 0);
+
+    rproto_stop(&proto2);
+    rserial_close(&proto_tx.serial);
+}
+
 int main(void)
 {
     printf("rproto unit tests\n");
@@ -392,6 +556,9 @@ int main(void)
     test_receive_truncated();
     test_receive_invalid_preamble();
     test_receive_bad_crc();
+    test_receive_with_byte_gap();
+    test_receive_with_byte_gap_mid_payload();
+    test_receive_back_to_back_frames();
 
     // Performance tests (throughput, latency, stress with noise, concurrent channels)
     run_perf_tests();

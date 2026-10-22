@@ -336,6 +336,65 @@ void test_noisy_traffic(void)
     perf_emu_reset_stats(0);
 }
 
+// Test 5: Byte jitter test - quantifies the exact real-hardware bug this rewrite fixes.
+// No packet loss/CRC corruption configured - purely inter-byte delay on the response frame
+// (2ms, 4x the OLD RPROTO_SERIAL_BYTE_TIMEOUT_US=500us inter-byte sub-timeout that used to
+// abort a multi-byte field read). Under the old per-field rserial_read() design this would
+// have failed on nearly every packet; the new cumulative-deadline design tolerates it
+// easily within the 50ms client timeout used here.
+void test_byte_jitter_traffic(void)
+{
+    printf("\n=== Byte Jitter Traffic Test ===\n");
+
+    rproto_serial proto_rx = {0};
+    runit_true(rproto_serial_setup(&proto_rx, TEST_PORT_RX, 115200, "8N1", 0) == 0);
+    runit_true(rproto_start(&proto_rx));
+
+    perf_emu_setup_mode(0, perf_emu_noisy_traffic_mode);
+    perf_emu_noisy_config jitter_cfg = {
+        .packet_loss_percent     = 0.0,
+        .crc_error_percent       = 0.0,
+        .min_delay_ms            = 0,
+        .max_delay_ms            = 0,
+        .max_inter_byte_delay_us = 2000,
+    };
+    perf_emu_setup_noisy_config(0, &jitter_cfg);
+
+    const int    NUM_PACKETS  = 100;
+    const size_t PAYLOAD_SIZE = 20;
+    uint8_t      payload[PAYLOAD_SIZE];
+    memset((void*) payload, 0xEE, PAYLOAD_SIZE);
+
+    rproto_packet pkt;
+    create_valid_packet(&pkt, PREAMBLE_REQUEST, 0x04, payload, PAYLOAD_SIZE);
+
+    int valid_responses = 0;
+    for (int i = 0; i < NUM_PACKETS; i++)
+    {
+        runit_true(rproto_send_packet(&proto_rx, &pkt));
+
+        rproto_packet rx_pkt;
+        bool          got = rproto_get_packet(&proto_rx, &rx_pkt, 50);
+        if (got && rx_pkt.preamble == PREAMBLE_REQUEST)
+        {
+            valid_responses++;
+        }
+    }
+
+    printf("Sent: %d packets, valid responses: %d (all should survive 2ms inter-byte jitter)\n",
+           NUM_PACKETS,
+           valid_responses);
+
+    // The old per-field design would have lost nearly all of these to the 500us inter-byte
+    // sub-timeout; the new design should get nearly all of them through.
+    runit_true(valid_responses > 90);
+
+    // Cleanup, and leave device 0 in a clean state for anything run after this.
+    runit_true(rproto_stop(&proto_rx));
+    perf_emu_reset_stats(0);
+    perf_emu_setup_mode(0, perf_emu_echo_mode);
+}
+
 // Print summary of all tests
 static void print_test_summary(void)
 {
@@ -375,6 +434,7 @@ void run_perf_tests(void)
     test_latency();
     test_concurrent_channels();
     test_noisy_traffic();
+    test_byte_jitter_traffic();
     print_test_summary();
 
     perf_emu_stop();

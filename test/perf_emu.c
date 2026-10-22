@@ -74,8 +74,12 @@ static void perf_emu_add_stats(int device_num, uint64_t received, uint64_t sent,
 
 // Build the wire frame (preamble + id + b64 length + base64 payload + CRC) and write it
 // with a raw serial transfer. rproto_send_packet() always recomputes the CRC, so this is
-// the only way to put a corrupted frame on the line.
-static bool perf_emu_send_raw_packet(rproto_serial* serial, const rproto_packet* packet, bool corrupt_crc)
+// the only way to put a corrupted frame on the line. If inter_byte_delay_us > 0, the frame
+// is split into two rserial_write() calls with that many microseconds in between instead of
+// one atomic write - simulating the real RS-485 inter-byte jitter that rproto's receive
+// side used to lose frames to (see test_byte_jitter_traffic in perf_test.c).
+static bool perf_emu_send_raw_packet(rproto_serial* serial, const rproto_packet* packet, bool corrupt_crc,
+                                      int inter_byte_delay_us)
 {
     uint8_t frame[sizeof(rproto_packet)];
 
@@ -94,30 +98,54 @@ static bool perf_emu_send_raw_packet(rproto_serial* serial, const rproto_packet*
     frame[crc_size + 1] = (uint8_t) ((crc >> 8) & 0xFF);
 
     size_t total_size = crc_size + sizeof(uint16_t);
-    return rserial_write(&serial->serial, frame, total_size) == (int) total_size;
+
+    if (inter_byte_delay_us <= 0 || total_size < 2)
+    {
+        return rserial_write(&serial->serial, frame, total_size) == (int) total_size;
+    }
+
+    size_t split = total_size / 2;
+    if (rserial_write(&serial->serial, frame, split) != (int) split)
+    {
+        return false;
+    }
+    usleep((unsigned int) inter_byte_delay_us);
+    size_t rest = total_size - split;
+    return rserial_write(&serial->serial, &frame[split], rest) == (int) rest;
 }
 
 void perf_emu_loop(int device_num)
 {
-    perf_emu_enter_critical_section();
-    bool                          quit = false;
-    struct perf_emu_instance_data data = pei_data[device_num];
-    perf_emu_leave_critical_section();
+    // Operates on a persistent pointer into the shared pei_data[] array, NOT a by-value
+    // copy: rproto_get_packet() now carries receive state (rx_queue) across calls on the
+    // SAME rproto_serial instance (it may buffer more than one frame's worth of bytes from
+    // a single underlying read). The old per-field rserial_read() design had no such
+    // cross-call state, so copying the whole struct out of the array every iteration (as
+    // this used to do) was harmless; now it would silently drop any buffered bytes beyond
+    // the frame just processed every single iteration. actual_mode/noisy_config are still
+    // snapshotted fresh each iteration under the lock, since those ARE legitimately changed
+    // live by perf_emu_setup_mode()/perf_emu_setup_noisy_config() from another thread.
+    struct perf_emu_instance_data* data = &pei_data[device_num];
+    bool                            quit = false;
 
     while (!quit)
     {
+        perf_emu_mode         mode;
+        perf_emu_noisy_config noisy_config;
+
         perf_emu_enter_critical_section();
-        quit = perf_emu_quit;
-        data = pei_data[device_num];
+        quit         = perf_emu_quit;
+        mode         = data->actual_mode;
+        noisy_config = data->noisy_config;
         perf_emu_leave_critical_section();
 
-        if (data.actual_mode == perf_emu_echo_mode)
+        if (mode == perf_emu_echo_mode)
         {
             // Echo mode: receive and send back
-            if (rproto_get_packet(&data.serial, &data.buf, PERF_EMU_WAIT_TIMEOUT_MS))
+            if (rproto_get_packet(&data->serial, &data->buf, PERF_EMU_WAIT_TIMEOUT_MS))
             {
-                perf_emu_add_stats(device_num, 1, 0, 0, perf_emu_packet_size(&data.buf));
-                if (rproto_send_packet(&data.serial, &data.buf))
+                perf_emu_add_stats(device_num, 1, 0, 0, perf_emu_packet_size(&data->buf));
+                if (rproto_send_packet(&data->serial, &data->buf))
                 {
                     perf_emu_add_stats(device_num, 0, 1, 0, 0);
                 }
@@ -127,18 +155,18 @@ void perf_emu_loop(int device_num)
                 }
             }
         }
-        else if (data.actual_mode == perf_emu_req_resp_mode)
+        else if (mode == perf_emu_req_resp_mode)
         {
             // Request/Response mode: respond to REQUEST with RESPONSE
-            if (rproto_get_packet(&data.serial, &data.buf, PERF_EMU_WAIT_TIMEOUT_MS))
+            if (rproto_get_packet(&data->serial, &data->buf, PERF_EMU_WAIT_TIMEOUT_MS))
             {
-                perf_emu_add_stats(device_num, 1, 0, 0, perf_emu_packet_size(&data.buf));
-                if (data.buf.preamble == PREAMBLE_REQUEST)
+                perf_emu_add_stats(device_num, 1, 0, 0, perf_emu_packet_size(&data->buf));
+                if (data->buf.preamble == PREAMBLE_REQUEST)
                 {
-                    data.buf.preamble       = PREAMBLE_RESPONSE;
-                    data.buf.payload_length = 2;
-                    memcpy(data.buf.payload, "OK", 2);
-                    if (rproto_send_packet(&data.serial, &data.buf))
+                    data->buf.preamble       = PREAMBLE_RESPONSE;
+                    data->buf.payload_length = 2;
+                    memcpy(data->buf.payload, "OK", 2);
+                    if (rproto_send_packet(&data->serial, &data->buf))
                     {
                         perf_emu_add_stats(device_num, 0, 1, 0, 0);
                     }
@@ -149,25 +177,25 @@ void perf_emu_loop(int device_num)
                 }
             }
         }
-        else if (data.actual_mode == perf_emu_noisy_traffic_mode)
+        else if (mode == perf_emu_noisy_traffic_mode)
         {
             // Noisy traffic mode: receive and respond with injected noise
-            if (rproto_get_packet(&data.serial, &data.buf, PERF_EMU_WAIT_TIMEOUT_MS))
+            if (rproto_get_packet(&data->serial, &data->buf, PERF_EMU_WAIT_TIMEOUT_MS))
             {
-                perf_emu_add_stats(device_num, 1, 0, 0, perf_emu_packet_size(&data.buf));
+                perf_emu_add_stats(device_num, 1, 0, 0, perf_emu_packet_size(&data->buf));
 
                 // Simulate processing delay
-                noisy_sleep(&data.noisy_config);
+                noisy_sleep(&noisy_config);
 
-                if (perf_emu_noisy_should_drop(&data))
+                if (perf_emu_noisy_should_drop(data))
                 {
                     // Packet lost in the noisy channel, no response is sent
                 }
-                else if (perf_emu_noisy_should_corrupt(&data))
+                else if (perf_emu_noisy_should_corrupt(data))
                 {
                     // Send a frame with corrupted CRC (raw write, rproto_send_packet
                     // would recompute the CRC)
-                    if (perf_emu_send_raw_packet(&data.serial, &data.buf, true))
+                    if (perf_emu_send_raw_packet(&data->serial, &data->buf, true, 0))
                     {
                         perf_emu_add_stats(device_num, 0, 1, 1, 0);
                     }
@@ -178,7 +206,14 @@ void perf_emu_loop(int device_num)
                 }
                 else
                 {
-                    if (rproto_send_packet(&data.serial, &data.buf))
+                    // A valid response - routed through the raw writer (no CRC corruption)
+                    // whenever inter-byte jitter is configured, so the jitter actually lands
+                    // on the wire; rproto_send_packet() always writes a frame atomically.
+                    bool sent = (noisy_config.max_inter_byte_delay_us > 0)
+                                    ? perf_emu_send_raw_packet(
+                                          &data->serial, &data->buf, false, noisy_config.max_inter_byte_delay_us)
+                                    : rproto_send_packet(&data->serial, &data->buf);
+                    if (sent)
                     {
                         perf_emu_add_stats(device_num, 0, 1, 0, 0);
                     }
@@ -189,7 +224,7 @@ void perf_emu_loop(int device_num)
                 }
             }
         }
-        else if (data.actual_mode == perf_emu_unknown_mode)
+        else if (mode == perf_emu_unknown_mode)
         {
             usleep(1);
         }

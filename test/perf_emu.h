@@ -25,6 +25,12 @@ typedef struct
     double crc_error_percent;    // 0.0 - 100.0
     int    min_delay_ms;         // Minimum delay between packets
     int    max_delay_ms;         // Maximum delay between packets
+    // Splits the OUTGOING response frame into two rserial_write() calls with this many
+    // microseconds between them, simulating real RS-485 hardware where bytes of one
+    // response can arrive apart by more than rproto's old (now removed) 500us per-byte
+    // sub-timeout. 0 = frame written as one normal rserial_write() call, like every other
+    // emulator mode.
+    int max_inter_byte_delay_us;
 } perf_emu_noisy_config;
 
 // Instance data for each device

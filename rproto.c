@@ -9,10 +9,7 @@
 #include "rserial.h"
 #include "rtimeout.h"
 
-// Polling granularity for rproto_get_packet()'s cumulative-deadline receive loop - matches
-// the design already validated against real RS-485 hardware in
-// diagnostics/rserial_layer/main.c (0-1% loss there vs. 25-75% loss through the old
-// per-field rserial_read() design this replaces).
+
 #define RPROTO_POLL_SLEEP_US 200
 // rserial_read_stream() has no buffer-size parameter of its own - it always reads however
 // many bytes FIONREAD reports, so this just has to be generously larger than one frame's
@@ -38,7 +35,7 @@ bool rproto_start(rproto_serial* instance)
                      instance->settings.baud,
                      instance->settings.mode,
                      instance->settings.flow_ctrl,
-                     RPROTO_SERIAL_BYTE_TIMEOUT_US) != 0)
+                     500) != 0)
     {
         RLOG_ERROR("rs serial : %s not started ", instance->settings.port_name);
         return false;
@@ -105,13 +102,7 @@ int rproto_serial_setup(rproto_serial* instance, char* port_name, int baud, char
     return 0;
 }
 
-// Reads one full frame off the wire against a single cumulative deadline for the whole
-// frame, polling via rserial_read_stream() instead of calling rserial_read() once per field
-// (preamble/id/length/payload/crc) with a fixed 500us inter-byte sub-timeout. The old
-// per-field design was measured on real RS-485 hardware losing 25-75% of frames to that
-// 500us sub-timeout alone, even though the bytes were still arriving - just occasionally
-// slightly slower than 500us apart (transceiver turnaround, firmware jitter). This mirrors
-// the design already validated there (0-1% loss) in diagnostics/rserial_layer/main.c.
+
 bool rproto_get_packet(rproto_serial* instance, rproto_packet* packet, unsigned int timeout_ms)
 {
     if (instance == NULL || packet == NULL)

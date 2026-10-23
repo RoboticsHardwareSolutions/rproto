@@ -78,8 +78,10 @@ static void perf_emu_add_stats(int device_num, uint64_t received, uint64_t sent,
 // is split into two rserial_write() calls with that many microseconds in between instead of
 // one atomic write - simulating the real RS-485 inter-byte jitter that rproto's receive
 // side used to lose frames to (see test_byte_jitter_traffic in perf_test.c).
-static bool perf_emu_send_raw_packet(rproto_serial* serial, const rproto_packet* packet, bool corrupt_crc,
-                                      int inter_byte_delay_us)
+static bool perf_emu_send_raw_packet(rproto_serial*       serial,
+                                     const rproto_packet* packet,
+                                     bool                 corrupt_crc,
+                                     int                  inter_byte_delay_us)
 {
     uint8_t frame[sizeof(rproto_packet)];
 
@@ -126,7 +128,7 @@ void perf_emu_loop(int device_num)
     // snapshotted fresh each iteration under the lock, since those ARE legitimately changed
     // live by perf_emu_setup_mode()/perf_emu_setup_noisy_config() from another thread.
     struct perf_emu_instance_data* data = &pei_data[device_num];
-    bool                            quit = false;
+    bool                           quit = false;
 
     while (!quit)
     {
@@ -210,8 +212,10 @@ void perf_emu_loop(int device_num)
                     // whenever inter-byte jitter is configured, so the jitter actually lands
                     // on the wire; rproto_send_packet() always writes a frame atomically.
                     bool sent = (noisy_config.max_inter_byte_delay_us > 0)
-                                    ? perf_emu_send_raw_packet(
-                                          &data->serial, &data->buf, false, noisy_config.max_inter_byte_delay_us)
+                                    ? perf_emu_send_raw_packet(&data->serial,
+                                                               &data->buf,
+                                                               false,
+                                                               noisy_config.max_inter_byte_delay_us)
                                     : rproto_send_packet(&data->serial, &data->buf);
                     if (sent)
                     {

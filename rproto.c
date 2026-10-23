@@ -9,7 +9,6 @@
 #include "rserial.h"
 #include "rtimeout.h"
 
-
 #define RPROTO_POLL_SLEEP_US 200
 // rserial_read_stream() has no buffer-size parameter of its own - it always reads however
 // many bytes FIONREAD reports, so this just has to be generously larger than one frame's
@@ -101,7 +100,6 @@ int rproto_serial_setup(rproto_serial* instance, char* port_name, int baud, char
     instance->settings.flow_ctrl = flowctrl;
     return 0;
 }
-
 
 bool rproto_get_packet(rproto_serial* instance, rproto_packet* packet, unsigned int timeout_ms)
 {

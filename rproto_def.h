@@ -39,13 +39,12 @@ typedef struct
     int  flow_ctrl;
 } proto_serial_settings;
 
-
 #define RPROTO_RX_QUEUE_SIZE 4096
 
 typedef struct
 {
     rserial               serial;
     proto_serial_settings settings;
-    uint8_t rx_queue[RPROTO_RX_QUEUE_SIZE];
-    size_t  rx_queue_len;
+    uint8_t               rx_queue[RPROTO_RX_QUEUE_SIZE];
+    size_t                rx_queue_len;
 } rproto_serial;

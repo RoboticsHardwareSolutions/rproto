@@ -492,7 +492,7 @@ void test_receive_back_to_back_frames(void)
     size_t  combined_len = 0;
 
     uint8_t frame_a[32];
-    int     idx = 0;
+    int     idx           = 0;
     frame_a[idx++]        = 0xAA;
     frame_a[idx++]        = 0xAA;
     frame_a[idx++]        = 0x30;
